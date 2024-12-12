@@ -1,10 +1,10 @@
-const mysql = require('mysql2');
+import mysql from 'mysql2';
 
 // Create a connection pool
 const pool = mysql.createPool({
   host: '69.30.241.210', // Replace with your VPS IP address
-  user: 'root', // Replace with your MySQL username
-  password: 'mynewpassword', // Replace with your MySQL password
+  user: 'extension-user', // Replace with your MySQL username
+  password: 'qKJMu7Xinhevsgw', // Replace with your MySQL password
   database: 'extension', // Name of your database
   waitForConnections: true,
   connectionLimit: 10,
@@ -12,4 +12,4 @@ const pool = mysql.createPool({
 });
 
 // Export the pool for use in other files
-module.exports = pool.promise();
+export default pool.promise();

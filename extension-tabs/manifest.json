@@ -2,9 +2,12 @@
     "manifest_version": 3,
     "name": "extension-tabs",
     "version": "1.0.0",
+    "permissions": [
+        "tabs", "windows"
+    ],
     "background": {
-        "service_worker": "src/background.ts",
+        "service_worker": "src/background.js",
         "type": "module"
-      },
+    },
     "action": { "default_popup": "index.html" }
-  }
+}
