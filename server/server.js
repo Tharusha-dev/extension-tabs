@@ -171,6 +171,7 @@ app.post("/webhook", async (req, res) => {
       
     } else {
       const url = body?.content;
+      if(isUrlUsed(url)) return 
       const groupId = url?.match(/e=(\d+)/)?.[1];
       console.log(groupId)
       const urlId = await addUrlToGroup(groupId, url);
@@ -218,6 +219,14 @@ app.post("/delete-url", async (req, res) => {
   io.to("extension").emit("url-deleted", { urlId });
 });
 
+app.delete("/clear-db", async (req, res) => {
+  console.log("clear-db");
+  console.log(req.body);
+  const deleted = await clearDb();
+  res.json("deleted");
+  io.to("extension").emit("db-cleared");
+});
+
 io.use((socket, next) => {
   next();
 }).on("connection", async (socket) => {
@@ -239,6 +248,14 @@ io.use((socket, next) => {
     });
   }
 });
+
+async function clearDb(){
+  await db.execute(`DELETE FROM urls;`);
+  await db.execute(`DELETE FROM url_groups;`);
+  await db.execute(`ALTER TABLE urls AUTO_INCREMENT = 1;`);
+  await db.execute(`ALTER TABLE url_groups AUTO_INCREMENT = 1;`);
+  
+}
 
 async function fetchUrlGroupsFromLast10M() {
   try {
@@ -282,12 +299,13 @@ async function deleteUrlById(urlId) {
   console.log("deleteUrlById");
   console.log(urlId);
   try {
-    const [result] = await db.execute("DELETE FROM urls WHERE url_id = ?", [
-      urlId,
-    ]);
-    return result.affectedRows > 0; // Returns true if a row was deleted
+    const [result] = await db.execute(
+      "UPDATE urls SET used = 1 WHERE url_id = ?",
+      [urlId]
+    );
+    return result.affectedRows > 0; // Returns true if a row was updated
   } catch (error) {
-    console.error("Error deleting URL:", error);
+    console.error("Error updating URL:", error);
     throw error;
   }
 }
@@ -364,6 +382,24 @@ async function addUrlToGroup(groupId, url) {
   }
 }
 
+async function isUrlUsed(url) {
+  try {
+    const [rows] = await db.execute(
+      'SELECT used FROM urls WHERE url = ? LIMIT 1',
+      [url]
+    );
+    
+    // If no rows found, return false
+    if (rows.length === 0) return false;
+    
+    // Return true if used is 1, false if 0
+    return rows[0].used === 1;
+    
+  } catch (error) {
+    console.error("Error checking URL usage:", error);
+    throw error;
+  }
+}
 
 function logger(msg){
   console.log(`${Date.now()} | ${msg}`);

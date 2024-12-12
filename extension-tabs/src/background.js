@@ -3,7 +3,7 @@ console.log("background.js");
 
 
 async function getUrls(){
-    const resUrls = await fetch(`http://localhost:3020/urls`);
+    const resUrls = await fetch(`http://69.30.241.210:3020/urls`);
     const dataUrls = await resUrls.json();
     console.log(dataUrls);
 
@@ -22,7 +22,7 @@ async function getUrls(){
 }
 
 async function getRecentGroups(){
-    const resGroups = await fetch(`http://localhost:3020/groups`);
+    const resGroups = await fetch(`http://69.30.241.210:3020/groups`);
     const dataGroups = await resGroups.json();
     console.log(dataGroups);
     return dataGroups;
@@ -41,7 +41,7 @@ function createNewTabInWindow(url) {
 }
 
 async function deleteUrl(urlId){
-    const res = await fetch(`http://localhost:3020/delete-url`, {
+    const res = await fetch(`http://69.30.241.210:3020/delete-url`, {
         headers: {
             'Content-Type': 'application/json'
         },
@@ -50,6 +50,15 @@ async function deleteUrl(urlId){
     });
     const data = await res.json();
     console.log(data);
+}
+
+async function clearDb(){
+    const res = await fetch(`http://69.30.241.210:3020/clear-db`, {
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        method: "DELETE"
+    });
 }
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
@@ -69,6 +78,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
         if(request.type === "delete-url"){
             deleteUrl(request.urlId);
+        }
+        if(request.type === "clear-db"){
+            clearDb();
         }
     return true;
 });

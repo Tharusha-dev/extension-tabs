@@ -34,7 +34,7 @@ function App() {
 
   function join() {
     setSocket(
-      io("http://localhost:3020", {
+      io("http://69.30.241.210:3020", {
         query: {
           type: "extension-request",
         },
@@ -145,7 +145,7 @@ function App() {
         {isConnected ? (
           <span className="connected-status">
             
-            <div class="circle"></div>
+            <div className="circle"></div>
             Socket connected</span>
         ) : (
           <button className="join-button" onClick={join}>
@@ -193,9 +193,11 @@ function App() {
                 <button 
                   className="danger-button"
                   onClick={() => {
-                    if (window.confirm('Are you sure you want to clear the database? This action cannot be undone.')) {
+                    if (window.confirm('Are you sure you want to clear the database? This will remove all urls and groups.')) {
                       chrome.runtime.sendMessage({ type: "clear-db" });
                     }
+                    setGroups([]);
+                    setUrls([]);
                   }}
                 >
                   Clear DB
@@ -229,7 +231,7 @@ function App() {
                       className="url-button"
                       onClick={() => createNewTabInWindow(url.url, url.urlId)}
                     >
-                      Same Window
+                      New Window
                     </button>
                   </div>
                 </div>
