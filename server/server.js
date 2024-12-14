@@ -134,47 +134,82 @@ app.post("/webhook", async (req, res) => {
     const body = req.body;
     const isGroupReq = !body?.content;
 
-    console.log("isGroupReq", isGroupReq)
-
-
-    // Check queue health before processing
-    const availableSockets = extensionQueue.checkQueueHealth();
-
-
-
-    if (availableSockets === 0) {
-      return res.status(503).json({
-        error: "No extension clients available",
-        queueSize: extensionQueue.size(),
-      });
-    }
-
-    const targetSocket = extensionQueue.getNextValidSocket();
-
-
-    if (!targetSocket) {
-      return res.status(503).json({
-        error: "No valid extension clients available",
-      });
-    }
+    console.log("isGroupReq", isGroupReq);
 
     if (isGroupReq) {
-
+      console.log("isGroupReq");
       const unsanitizedUrl = body?.embeds[0]?.fields[0]?.value;
-      
-      const groupId = unsanitizedUrl?.match(/e=(\d+)/)?.[1];
-      console.log(groupId)
-      await insertUrlGroup(groupId, "group");
 
-      // targetSocket.emit("group-added", groupId);
+      const groupId = unsanitizedUrl?.match(/e=(\d+)/)?.[1];
+      console.log(groupId);
+      const group = await fetchGroupById(groupId);
+
+      if(group.length === 0){
+        await insertUrlGroup(groupId, "group");
+        io.to("extension").emit("group-added", groupId);
+
+        return res.status(200).json({
+         
+          success: true,
+          queueSize: extensionQueue.size(),
+        });
+
+      }else {
       io.to("extension").emit("group-added", groupId);
+
+        return res.status(200).json({
+          msg: "group already in db",
+          success: true,
+          queueSize: extensionQueue.size(),
+        });
+      }
+
       
     } else {
-      const url = body?.content;
-      if(isUrlUsed(url)) return 
+      console.log("isUrlReq");
+      const url = body?.content.replaceAll("`", "");
+      const urlInDb = await isUrlInDb(url);
+
+      if (urlInDb) {
+
+        // console.log(urlInDb);
+        return res.status(200).json({
+          msg: "url already in db",
+          success: true,
+          queueSize: extensionQueue.size(),
+        });
+      
+      }
+      console.log("isUrlReq 2");
       const groupId = url?.match(/e=(\d+)/)?.[1];
-      console.log(groupId)
+
+      const group = await fetchGroupById(groupId);
+
+      if (group.length === 0) {
+        await insertUrlGroup(groupId, "group");
+        io.to("extension").emit("group-added", groupId);
+      }
+
+      console.log(groupId);
       const urlId = await addUrlToGroup(groupId, url);
+
+      // Check queue health before processing
+      const availableSockets = extensionQueue.checkQueueHealth();
+
+      if (availableSockets === 0) {
+        return res.status(503).json({
+          error: "No extension clients available",
+          queueSize: extensionQueue.size(),
+        });
+      }
+
+      const targetSocket = extensionQueue.getNextValidSocket();
+
+      if (!targetSocket) {
+        return res.status(503).json({
+          error: "No valid extension clients available",
+        });
+      }
 
       targetSocket.emit("url-added", { groupId, urlId, url });
     }
@@ -196,18 +231,22 @@ app.post("/webhook", async (req, res) => {
 
 app.get("/urls", async (req, res) => {
   console.log("urls");
-
-  const links = await fetchLinksFromLast10Minutes();
-
+  const minutes = req.query.minutes ? parseInt(req.query.minutes) : 10;
+  const links = await fetchLinksFromLast10Minutes(minutes);
   res.json(links);
 });
 
 app.get("/groups", async (req, res) => {
-
   logger("groups");
-
-  const groups = await fetchUrlGroupsFromLast10M();
+  const minutes = req.query.minutes ? parseInt(req.query.minutes) : 10;
+  const groups = await fetchUrlGroupsFromLastMiniutes(minutes);
   res.json(groups);
+});
+
+app.get("/group/:groupId", async (req, res) => {
+  const groupId = req.params.groupId;
+  const group = await fetchUrlsByGroupId(groupId);
+  res.json(group);
 });
 
 app.post("/delete-url", async (req, res) => {
@@ -249,18 +288,20 @@ io.use((socket, next) => {
   }
 });
 
-async function clearDb(){
+async function clearDb() {
   await db.execute(`DELETE FROM urls;`);
   await db.execute(`DELETE FROM url_groups;`);
   await db.execute(`ALTER TABLE urls AUTO_INCREMENT = 1;`);
   await db.execute(`ALTER TABLE url_groups AUTO_INCREMENT = 1;`);
-  
 }
 
-async function fetchUrlGroupsFromLast10M() {
+async function fetchUrlGroupsFromLastMiniutes(timeInMin = 10) {
   try {
-    const [rows] = await db.query("SELECT group_id FROM url_groups");
-    const groupIds = rows.map(row => row.group_id);
+    const [rows] = await db.query(
+      "SELECT group_id FROM url_groups WHERE added_time >= NOW() - INTERVAL ? MINUTE",
+      [timeInMin]
+    );
+    const groupIds = rows.map((row) => row.group_id);
     console.log("URL Groups:", groupIds);
     return groupIds;
   } catch (error) {
@@ -269,14 +310,18 @@ async function fetchUrlGroupsFromLast10M() {
   }
 }
 
-async function fetchLinksFromLast10Minutes() {
+async function fetchLinksFromLast10Minutes(timeInMin = 10) {
   try {
     // Query to fetch URLs added in the last 10 minutes
-    const [rows] = await db.execute(`
-      SELECT url, group_id, added_time 
+    const [rows] = await db.execute(
+      `
+       SELECT url, group_id, added_time 
       FROM urls 
-      WHERE added_time >= NOW() - INTERVAL 100 MINUTE
-    `);
+      WHERE added_time >= NOW() - INTERVAL ? MINUTE
+      AND used = 0
+    `,
+      [timeInMin]
+    );
 
     // Group the results by group_id
     const groupedResults = rows.reduce((acc, row) => {
@@ -287,7 +332,7 @@ async function fetchLinksFromLast10Minutes() {
       return acc;
     }, {});
 
-    console.log(groupedResults);
+    // console.log(groupedResults);
     return groupedResults; // Returns an object grouped by group_id
   } catch (error) {
     console.error("Error fetching links from the last 10 minutes:", error);
@@ -315,7 +360,7 @@ async function executeQuery(sql, params) {
     const results = await db.query(sql, params);
     return results;
   } catch (error) {
-    console.error('Database query error:', error);
+    console.error("Database query error:", error);
     throw error;
   }
 }
@@ -332,6 +377,15 @@ async function insertUrlGroup(id, name) {
     console.error("Error inserting URL group:", error);
     throw error;
   }
+}
+
+async function fetchGroupById(groupId) {
+  const [rows] = await db.execute(
+    "SELECT * FROM url_groups WHERE group_id = ?",
+    [groupId]
+  );
+  console.log("Group:", rows);
+  return rows;
 }
 
 async function fetchUrlsByGroupId(groupId) {
@@ -364,6 +418,8 @@ async function fetchLinksFromGroupInLastMinutes(groupId, minutes) {
 }
 
 async function addUrlToGroup(groupId, url) {
+  console.log("addUrlToGroup");
+  console.log(groupId, url);
   try {
     // Insert query to add a new URL to the specified group
     const [result] = await db.execute(
@@ -374,34 +430,33 @@ async function addUrlToGroup(groupId, url) {
       [groupId, url]
     );
 
-    return result.insertId // Return the ID of the newly inserted row
- 
+    return result.insertId; // Return the ID of the newly inserted row
   } catch (error) {
     console.error("Error adding URL to group:", error);
     throw error; // Re-throw error for further handling
   }
 }
 
-async function isUrlUsed(url) {
+async function isUrlInDb(url) {
   try {
     const [rows] = await db.execute(
-      'SELECT used FROM urls WHERE url = ? LIMIT 1',
+      "SELECT url FROM urls WHERE url = ? ",
       [url]
     );
+
     
-    // If no rows found, return false
-    if (rows.length === 0) return false;
-    
-    // Return true if used is 1, false if 0
-    return rows[0].used === 1;
-    
+
+    return rows.length > 0;
+
+
+   
   } catch (error) {
     console.error("Error checking URL usage:", error);
     throw error;
   }
 }
 
-function logger(msg){
+function logger(msg) {
   console.log(`${Date.now()} | ${msg}`);
 }
 process.on("SIGINT", async () => {
@@ -421,4 +476,3 @@ server.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
 
-// fetchLinksFromLast10Minutes()

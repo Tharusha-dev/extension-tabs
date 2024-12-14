@@ -3,7 +3,7 @@
     "name": "extension-tabs",
     "version": "1.0.0",
     "permissions": [
-        "tabs", "windows"
+        "tabs", "windows", "storage"
     ],
     "background": {
         "service_worker": "src/background.js",

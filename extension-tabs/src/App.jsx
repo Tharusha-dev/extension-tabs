@@ -4,20 +4,16 @@ import "./App.css";
 import { io } from "socket.io-client";
 import { useEffect } from "react";
 
+
+const serverUrl = "http://69.30.241.210:3020"
+
 function App() {
-  const [socket, setSocket] = useState(null);
-
-  // const socket = io("http://localhost:3020", {
-  //   query: {
-  //     type: "extension-request"
-  //   }
-  // });
-
-  const [count, setCount] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
 
+  const [count, setCount] = useState(0);
   const [groups, setGroups] = useState([]);
   const [urls, setUrls] = useState([]);
+  const [warningOpen, setWarningOpen] = useState(false)
 
   const [mode, setMode] = useState(0);
 
@@ -25,122 +21,152 @@ function App() {
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // async function getinitialData(){
-  //   const resGroups = await fetch("http://localhost:3000/groups");
-  //   const dataGroups = await resGroups.json();
-  //   setGroups(dataGroups);
-
-  // }
 
   function join() {
-    setSocket(
-      io("http://69.30.241.210:3020", {
-        query: {
-          type: "extension-request",
-        },
-      })
-    );
+    chrome.runtime.sendMessage({ type: "connect-socket" });
   }
 
-  async function getRecentGroups() {
-    chrome.runtime.sendMessage(
-      { type: "get-recent-groups" },
-      function (response) {
-        setGroups(response);
-      }
-    );
-  }
+
 
   useEffect(() => {
-    getRecentGroups();
+    // getRecentGroups();
+    chrome.runtime.sendMessage({ type: "socket-status" }).then((result) => {
+      setIsConnected(result);
+    });
+    chrome.storage.local.get("is-connected").then((result) => {
+      setIsConnected(result["is-connected"]);
+    });
+    chrome.storage.local.get("url-store").then((result) => {
+      console.log(result["url-store"]);
+
+      if(result["url-store"]){
+        setUrls(result["url-store"]);
+      }
+    });
+
+    chrome.storage.local.get("groups").then((result) => {
+      console.log(result["groups"]);
+      if(result["groups"]){
+        setGroups(result["groups"]);
+      }
+    });
   }, []);
 
   useEffect(() => {
-    function onConnect() {
-      setIsConnected(true);
-    }
+    const messageListener = (message) => {
+      switch (message.type) {
+        case "socket-connected":
+          setIsConnected(true);
+          break;
+        case "socket-disconnected":
+          setIsConnected(false);
+          break;
+        case "url-added":
+          console.log("url-added");
+          const data = message.data;
+          const cleanData = {
+            groupId: data.groupId,
+            url: data.url.replaceAll("`", ""),
+            urlId: data.urlId,
+          };
 
-    function onDisconnect() {
-      setIsConnected(false);
-    }
+          // if(!groups.includes(cleanData.groupId)){
 
-    async function addUrl(data) {
-      console.log(data);
+          //   if(mode == 1){
+          //     console.log("Auto mode");
+          //     createNewTabInWindow(cleanData.url, cleanData.urlId);
+          //     setAutoModeGroupId(null);
+          //     chrome.runtime.sendMessage({
+          //       type: "delete-url",
+          //       urlId: cleanData.urlId,
+          //     });
+          //     // setMode(0);
+         
+          //   }
 
-      const cleanData = {
-        groupId: data.groupId,
-        url: data.url.replaceAll("`", ""),
-        urlId: data.urlId,
-      };
 
-      if (data.groupId == autoModeGroupId) {
-        console.log("URL is in auto group ", autoModeGroupId, data.groupId);
-        createNewTabInWindow(cleanData.url, cleanData.urlId);
-        setAutoModeGroupId(null);
-        chrome.runtime.sendMessage({
-          type: "delete-url",
-          urlId: cleanData.urlId,
-        });
-        return;
-      } else {
-        console.log("URL is not in auto group ", autoModeGroupId, data.groupId);
+          //   setGroups((previous) => [...previous, cleanData.groupId]);
+          //  chrome.storage.local.get("groups").then((result) => {
+          //   chrome.storage.local.set({ "groups": [...result.groups, cleanData.groupId] });
+          //  });
+           
+          // }
+
+          if (data.groupId == autoModeGroupId) {
+            console.log("Auto mode");
+            createNewTabInWindow(cleanData.url, cleanData.urlId);
+            setAutoModeGroupId(null);
+            chrome.runtime.sendMessage({
+              type: "delete-url",
+              urlId: cleanData.urlId,
+            });
+
+            // setMode(0);
+            return;
+          }
+
+          setUrls((previous) => {
+            const exists = previous.some(
+              (item) =>
+                item.groupId === cleanData.groupId && item.url === cleanData.url
+            );
+            return exists ? previous : [...previous, cleanData];
+          });
+          break;
+        case "group-added":
+          const group = message.group;
+          if (mode == 1) {
+            setAutoModeGroupId(group);
+            console.log("Auto mode group id set to", group);
+          }
+          setGroups((previous) => {
+            return previous.includes(group) ? previous : [...previous, group];
+          });
+          break;
       }
-      // Clean up the URL by removing backticks and decoding
+    };
 
-      console.log(cleanData);
-      setUrls((previous) => {
-        // Check if URL already exists for this group
-        const exists = previous.some(
-          (item) =>
-            item.groupId === cleanData.groupId && item.url === cleanData.url
-        );
-        // Only add if it doesn't exist
-        return exists ? previous : [...previous, cleanData];
-      });
-    }
+    chrome.runtime.onMessage.addListener(messageListener);
 
-    function addGroup(group) {
-      if (mode == 1) {
-        console.log("Adding group to auto mode ", group);
-        setAutoModeGroupId(group);
-      }
-
-      setGroups((previous) => {
-        // Check if group already exists
-        return previous.includes(group) ? previous : [...previous, group];
-      });
-    }
-
-    if (socket) {
-      socket.on("connect", onConnect);
-      socket.on("disconnect", onDisconnect);
-
-      socket.on("url-added", addUrl);
-      socket.on("group-added", addGroup);
-    }
-    // return () => {
-    //   socket.off('connect', onConnect);
-    //   socket.off('disconnect', onDisconnect);
-
-    // };
-  }, [socket, autoModeGroupId]);
+    return () => {
+      chrome.runtime.onMessage.removeListener(messageListener);
+    };
+  }, [mode, autoModeGroupId]);
 
   function createNewTab(url, urlId) {
     chrome.runtime.sendMessage({ type: "create-new-tab", url: url });
     chrome.runtime.sendMessage({ type: "delete-url", urlId: urlId });
     // Remove URL from local state
-    setUrls((previous) => previous.filter((item) => item.urlId !== urlId));
+
+    const newUrls = urls.filter((item) => item.urlId !== urlId);
+    setUrls(newUrls);
+    chrome.storage.local.set({ "url-store": newUrls });
+
   }
 
   function createNewTabInWindow(url, urlId) {
     chrome.runtime.sendMessage({ type: "create-new-tab-in-window", url: url });
     chrome.runtime.sendMessage({ type: "delete-url", urlId: urlId });
     // Remove URL from local state
-    setUrls((previous) => previous.filter((item) => item.urlId !== urlId));
+    const newUrls = urls.filter((item) => item.urlId !== urlId);
+    setUrls(newUrls);
+    chrome.storage.local.set({ "url-store": newUrls });
+
   }
 
   return (
     <div className="App">
+      {warningOpen && <div className="warning">
+        Are You sure, this will delete all urls and groups from db
+        <div>
+
+        
+
+        <button className="danger-button" onClick={()=> {chrome.runtime.sendMessage({ type: "clear-db" }); setWarningOpen(false)}}>Yes</button>
+        <button className="join-button" onClick={()=> {setWarningOpen(false)}}>Cancel</button>
+        </div>
+  
+        </div>}
       <div className="top">
         {isConnected ? (
           <span className="connected-status">
@@ -193,9 +219,8 @@ function App() {
                 <button 
                   className="danger-button"
                   onClick={() => {
-                    if (window.confirm('Are you sure you want to clear the database? This will remove all urls and groups.')) {
-                      chrome.runtime.sendMessage({ type: "clear-db" });
-                    }
+                    
+                    setWarningOpen(true)                    
                     setGroups([]);
                     setUrls([]);
                   }}
